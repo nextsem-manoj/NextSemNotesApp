@@ -34,81 +34,111 @@ export const DrawingCanvas: React.FC<DrawingCanvasProps> = ({
   onStrokeErase,
   scale,
 }) => {
-  const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  // Base canvas holds all committed strokes
+  const baseCanvasRef = useRef<HTMLCanvasElement | null>(null);
+  // Active canvas handles instantaneous drawing of current stroke without redrawing past strokes
+  const activeCanvasRef = useRef<HTMLCanvasElement | null>(null);
+
   const [isDrawing, setIsDrawing] = useState(false);
   const currentPointsRef = useRef<Point[]>([]);
-  const activeStrokeRef = useRef<Stroke | null>(null);
+  const isStraightLineRef = useRef<boolean>(false);
+  const holdTimerRef = useRef<number | null>(null);
+  const isBarrelErasingRef = useRef<boolean>(false);
 
-  // Redraw all committed strokes
-  const redrawAllStrokes = useCallback(
-    (ctx: CanvasRenderingContext2D) => {
-      ctx.clearRect(0, 0, width, height);
+  // Floating cursor position for exact pen tip & eraser radius indicator
+  const [cursorPos, setCursorPos] = useState<{ x: number; y: number; visible: boolean }>({
+    x: 0,
+    y: 0,
+    visible: false,
+  });
 
-      for (const stroke of strokes) {
-        if (!stroke.points || stroke.points.length === 0) continue;
+  // Render a single stroke with Bezier curves & pressure modulation
+  const drawStrokeToContext = (ctx: CanvasRenderingContext2D, stroke: Stroke) => {
+    if (!stroke.points || stroke.points.length === 0) return;
 
-        ctx.save();
-        ctx.lineCap = "round";
-        ctx.lineJoin = "round";
+    ctx.save();
+    ctx.lineCap = "round";
+    ctx.lineJoin = "round";
 
-        if (stroke.isHighlighter) {
-          ctx.globalAlpha = 0.45;
-          ctx.globalCompositeOperation = "multiply";
-        } else {
-          ctx.globalAlpha = 1.0;
-          ctx.globalCompositeOperation = "source-over";
-        }
+    if (stroke.isHighlighter) {
+      ctx.globalAlpha = 0.45;
+      ctx.globalCompositeOperation = "multiply";
+    } else {
+      ctx.globalAlpha = 1.0;
+      ctx.globalCompositeOperation = "source-over";
+    }
 
-        if (stroke.points.length === 1) {
-          ctx.fillStyle = stroke.color;
-          ctx.beginPath();
-          ctx.arc(stroke.points[0].x, stroke.points[0].y, stroke.width / 2, 0, Math.PI * 2);
-          ctx.fill();
-          ctx.restore();
-          continue;
-        }
+    if (stroke.isStraightLine && stroke.points.length >= 2) {
+      // Draw straight snapped ruler line
+      const pStart = stroke.points[0];
+      const pEnd = stroke.points[stroke.points.length - 1];
+      ctx.strokeStyle = stroke.color;
+      ctx.lineWidth = stroke.width;
+      ctx.beginPath();
+      ctx.moveTo(pStart.x, pStart.y);
+      ctx.lineTo(pEnd.x, pEnd.y);
+      ctx.stroke();
+      ctx.restore();
+      return;
+    }
 
-        ctx.strokeStyle = stroke.color;
+    if (stroke.points.length === 1) {
+      ctx.fillStyle = stroke.color;
+      ctx.beginPath();
+      ctx.arc(stroke.points[0].x, stroke.points[0].y, stroke.width / 2, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.restore();
+      return;
+    }
 
-        for (let i = 0; i < stroke.points.length - 1; i++) {
-          const p1 = stroke.points[i];
-          const p2 = stroke.points[i + 1];
-          const midX = (p1.x + p2.x) / 2;
-          const midY = (p1.y + p2.y) / 2;
+    ctx.strokeStyle = stroke.color;
 
-          const pressure = pressureSensitivity ? (p2.pressure ?? 0.5) : 0.5;
-          ctx.lineWidth = Math.max(1, stroke.width * (0.35 + pressure * 1.3));
+    for (let i = 0; i < stroke.points.length - 1; i++) {
+      const p1 = stroke.points[i];
+      const p2 = stroke.points[i + 1];
+      const midX = (p1.x + p2.x) / 2;
+      const midY = (p1.y + p2.y) / 2;
 
-          if (stroke.isRainbow) {
-            ctx.strokeStyle = `hsl(${(i * 12) % 360}, 100%, 60%)`;
-          } else if (stroke.isGalaxy) {
-            ctx.strokeStyle = i % 2 === 0 ? "#a855f7" : "#06b6d4";
-          }
+      const pressure = pressureSensitivity ? (p2.pressure ?? 0.5) : 0.5;
+      // Natural pressure taper
+      ctx.lineWidth = Math.max(1, stroke.width * (0.35 + pressure * 1.3));
 
-          ctx.beginPath();
-          ctx.moveTo(p1.x, p1.y);
-          ctx.quadraticCurveTo(p1.x, p1.y, midX, midY);
-          ctx.stroke();
-        }
-
-        ctx.restore();
+      if (stroke.isRainbow) {
+        ctx.strokeStyle = `hsl(${(i * 10) % 360}, 100%, 60%)`;
+      } else if (stroke.isGalaxy) {
+        ctx.strokeStyle = i % 2 === 0 ? "#a855f7" : "#06b6d4";
       }
-    },
-    [strokes, width, height, pressureSensitivity]
-  );
 
-  // Sync canvas dimensions and redraw when strokes update
-  useEffect(() => {
-    const canvas = canvasRef.current;
+      ctx.beginPath();
+      ctx.moveTo(p1.x, p1.y);
+      ctx.quadraticCurveTo(p1.x, p1.y, midX, midY);
+      ctx.stroke();
+    }
+
+    ctx.restore();
+  };
+
+  // Redraw all committed strokes on the base canvas
+  const redrawBaseCanvas = useCallback(() => {
+    const canvas = baseCanvasRef.current;
     if (!canvas) return;
     const ctx = canvas.getContext("2d");
     if (!ctx) return;
-    redrawAllStrokes(ctx);
-  }, [strokes, redrawAllStrokes]);
 
-  // Check if a point hits any existing stroke to erase it
+    ctx.clearRect(0, 0, width, height);
+
+    for (const stroke of strokes) {
+      drawStrokeToContext(ctx, stroke);
+    }
+  }, [strokes, width, height, pressureSensitivity]);
+
+  useEffect(() => {
+    redrawBaseCanvas();
+  }, [redrawBaseCanvas]);
+
+  // Check if an eraser point touches any stroke to delete it
   const checkStrokeErasure = (point: Point) => {
-    const eraserRadius = 16 / scale;
+    const eraserRadius = 18 / scale;
 
     for (const stroke of strokes) {
       for (const p of stroke.points) {
@@ -123,18 +153,53 @@ export const DrawingCanvas: React.FC<DrawingCanvasProps> = ({
     }
   };
 
-  const getCanvasCoordinates = (e: React.PointerEvent<HTMLCanvasElement>): Point => {
-    const canvas = canvasRef.current;
+  const getCanvasCoordinates = (clientX: number, clientY: number, pressure = 0.5): Point => {
+    const canvas = activeCanvasRef.current;
     if (!canvas) return { x: 0, y: 0, pressure: 0.5 };
     const rect = canvas.getBoundingClientRect();
-    const x = (e.clientX - rect.left) * (width / rect.width);
-    const y = (e.clientY - rect.top) * (height / rect.height);
-    const pressure = e.pressure && e.pressure > 0 ? e.pressure : 0.5;
-    return { x, y, pressure };
+    const x = (clientX - rect.left) * (width / rect.width);
+    const y = (clientY - rect.top) * (height / rect.height);
+    const normalizedPressure = pressure > 0 ? pressure : 0.5;
+    return { x, y, pressure: normalizedPressure, time: Date.now() };
+  };
+
+  // Clear the active stroke canvas
+  const clearActiveCanvas = () => {
+    const canvas = activeCanvasRef.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext("2d");
+    if (ctx) ctx.clearRect(0, 0, width, height);
+  };
+
+  // Render the current stroke on activeCanvas
+  const renderCurrentActiveStroke = () => {
+    const canvas = activeCanvasRef.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return;
+
+    ctx.clearRect(0, 0, width, height);
+
+    const points = currentPointsRef.current;
+    if (points.length === 0) return;
+
+    const currentStroke: Stroke = {
+      id: "active",
+      tool: activeTool === "highlighter" ? "highlighter" : "pen",
+      color: currentColor,
+      width: currentWidth,
+      isHighlighter,
+      isRainbow,
+      isGalaxy,
+      isStraightLine: isStraightLineRef.current,
+      points,
+    };
+
+    drawStrokeToContext(ctx, currentStroke);
   };
 
   const handlePointerDown = (e: React.PointerEvent<HTMLCanvasElement>) => {
-    // Palm Rejection: If user selected pen-only and event is touch, ignore drawing!
+    // Palm Rejection: If user selected pen-only and touch event fires, skip drawing
     if (palmRejection && e.pointerType === "touch") {
       return;
     }
@@ -143,152 +208,215 @@ export const DrawingCanvas: React.FC<DrawingCanvasProps> = ({
       return;
     }
 
-    const canvas = canvasRef.current;
+    const canvas = activeCanvasRef.current;
     if (!canvas) return;
     canvas.setPointerCapture(e.pointerId);
 
-    const pt = getCanvasCoordinates(e);
+    // Hardware Stylus Barrel Button (right click / buttons === 2 or buttons === 32 eraser tip)
+    const isBarrelButton = e.buttons === 2 || e.button === 2 || e.buttons === 32;
+    if (isBarrelButton) {
+      isBarrelErasingRef.current = true;
+    } else {
+      isBarrelErasingRef.current = false;
+    }
 
-    if (activeTool === "stroke-eraser" || activeTool === "precision-eraser") {
+    const effectiveEraser =
+      isBarrelErasingRef.current ||
+      activeTool === "stroke-eraser" ||
+      activeTool === "precision-eraser";
+
+    const pt = getCanvasCoordinates(e.clientX, e.clientY, e.pressure);
+
+    if (effectiveEraser) {
       setIsDrawing(true);
       checkStrokeErasure(pt);
       return;
     }
 
     setIsDrawing(true);
+    isStraightLineRef.current = false;
     currentPointsRef.current = [pt];
 
-    activeStrokeRef.current = {
-      id: "stroke_" + Date.now() + "_" + Math.random().toString(36).substr(2, 6),
-      tool: activeTool === "highlighter" ? "highlighter" : "pen",
-      color: currentColor,
-      width: currentWidth,
-      isHighlighter,
-      isRainbow,
-      isGalaxy,
-      points: [pt],
-    };
+    renderCurrentActiveStroke();
 
-    // Draw initial point on canvas
-    const ctx = canvas.getContext("2d");
-    if (ctx) {
-      ctx.save();
-      ctx.lineCap = "round";
-      ctx.lineJoin = "round";
-      if (isHighlighter) {
-        ctx.globalAlpha = 0.45;
-        ctx.globalCompositeOperation = "multiply";
+    // Draw & Hold Timer: Snap to straight line if pen is held stationary at end for 450ms
+    if (holdTimerRef.current) clearTimeout(holdTimerRef.current);
+    holdTimerRef.current = window.setTimeout(() => {
+      if (currentPointsRef.current.length >= 4) {
+        isStraightLineRef.current = true;
+        renderCurrentActiveStroke();
       }
-      ctx.fillStyle = currentColor;
-      ctx.beginPath();
-      ctx.arc(pt.x, pt.y, (currentWidth * (pressureSensitivity ? pt.pressure : 0.5)) / 2, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.restore();
-    }
+    }, 450);
   };
 
   const handlePointerMove = (e: React.PointerEvent<HTMLCanvasElement>) => {
+    // Update floating pen/eraser tip cursor indicator
+    setCursorPos({
+      x: e.clientX,
+      y: e.clientY,
+      visible: true,
+    });
+
     if (!isDrawing) return;
     if (palmRejection && e.pointerType === "touch") return;
 
-    const pt = getCanvasCoordinates(e);
+    const effectiveEraser =
+      isBarrelErasingRef.current ||
+      activeTool === "stroke-eraser" ||
+      activeTool === "precision-eraser";
 
-    if (activeTool === "stroke-eraser" || activeTool === "precision-eraser") {
-      checkStrokeErasure(pt);
-      return;
+    // High-frequency coalesced events from stylus tablet (Wacom, Huion, Apple Pencil)
+    const coalescedEvents = (e.nativeEvent && (e.nativeEvent as any).getCoalescedEvents)
+      ? (e.nativeEvent as any).getCoalescedEvents()
+      : [e];
+
+    for (const evt of coalescedEvents) {
+      const pt = getCanvasCoordinates(evt.clientX, evt.clientY, evt.pressure);
+
+      if (effectiveEraser) {
+        checkStrokeErasure(pt);
+      } else {
+        currentPointsRef.current.push(pt);
+      }
     }
 
-    const points = currentPointsRef.current;
-    points.push(pt);
-
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-    const ctx = canvas.getContext("2d");
-    if (!ctx) return;
-
-    if (points.length >= 2) {
-      const p1 = points[points.length - 2];
-      const p2 = points[points.length - 1];
-      const midX = (p1.x + p2.x) / 2;
-      const midY = (p1.y + p2.y) / 2;
-
-      ctx.save();
-      ctx.lineCap = "round";
-      ctx.lineJoin = "round";
-
-      if (isHighlighter) {
-        ctx.globalAlpha = 0.45;
-        ctx.globalCompositeOperation = "multiply";
-      } else {
-        ctx.globalAlpha = 1.0;
-        ctx.globalCompositeOperation = "source-over";
+    if (!effectiveEraser) {
+      // If user moved significantly after straight snap, reset snap unless held
+      if (isStraightLineRef.current && currentPointsRef.current.length > 5) {
+        const lastPt = currentPointsRef.current[currentPointsRef.current.length - 1];
+        const prevPt = currentPointsRef.current[currentPointsRef.current.length - 3];
+        const dist = Math.hypot(lastPt.x - prevPt.x, lastPt.y - prevPt.y);
+        if (dist > 15) {
+          isStraightLineRef.current = false;
+        }
       }
 
-      const pressure = pressureSensitivity ? pt.pressure : 0.5;
-      ctx.lineWidth = Math.max(1, currentWidth * (0.35 + pressure * 1.3));
+      renderCurrentActiveStroke();
 
-      if (isRainbow) {
-        ctx.strokeStyle = `hsl(${(points.length * 12) % 360}, 100%, 60%)`;
-      } else if (isGalaxy) {
-        ctx.strokeStyle = points.length % 2 === 0 ? "#a855f7" : "#06b6d4";
-      } else {
-        ctx.strokeStyle = currentColor;
-      }
-
-      ctx.beginPath();
-      ctx.moveTo(p1.x, p1.y);
-      ctx.quadraticCurveTo(p1.x, p1.y, midX, midY);
-      ctx.stroke();
-      ctx.restore();
+      // Reset draw-and-hold timer on movement
+      if (holdTimerRef.current) clearTimeout(holdTimerRef.current);
+      holdTimerRef.current = window.setTimeout(() => {
+        if (currentPointsRef.current.length >= 4) {
+          isStraightLineRef.current = true;
+          renderCurrentActiveStroke();
+        }
+      }, 450);
     }
   };
 
   const handlePointerUp = (e: React.PointerEvent<HTMLCanvasElement>) => {
+    if (holdTimerRef.current) {
+      clearTimeout(holdTimerRef.current);
+      holdTimerRef.current = null;
+    }
+
     if (!isDrawing) return;
     setIsDrawing(false);
 
     try {
-      const canvas = canvasRef.current;
+      const canvas = activeCanvasRef.current;
       if (canvas && canvas.hasPointerCapture(e.pointerId)) {
         canvas.releasePointerCapture(e.pointerId);
       }
     } catch {
-      // Ignore if pointer capture already released
+      // ignore
     }
 
-    if (activeTool === "stroke-eraser" || activeTool === "precision-eraser") {
+    const effectiveEraser =
+      isBarrelErasingRef.current ||
+      activeTool === "stroke-eraser" ||
+      activeTool === "precision-eraser";
+
+    if (effectiveEraser) {
+      isBarrelErasingRef.current = false;
       return;
     }
 
-    if (activeStrokeRef.current && currentPointsRef.current.length > 0) {
-      activeStrokeRef.current.points = [...currentPointsRef.current];
-      onStrokeComplete(activeStrokeRef.current);
-      activeStrokeRef.current = null;
+    if (currentPointsRef.current.length > 0) {
+      const finalStroke: Stroke = {
+        id: "stroke_" + Date.now() + "_" + Math.random().toString(36).substr(2, 6),
+        tool: activeTool === "highlighter" ? "highlighter" : "pen",
+        color: currentColor,
+        width: currentWidth,
+        isHighlighter,
+        isRainbow,
+        isGalaxy,
+        isStraightLine: isStraightLineRef.current,
+        points: [...currentPointsRef.current],
+      };
+
+      clearActiveCanvas();
+      onStrokeComplete(finalStroke);
       currentPointsRef.current = [];
+      isStraightLineRef.current = false;
     }
   };
 
+  const handlePointerLeave = () => {
+    setCursorPos((prev) => ({ ...prev, visible: false }));
+  };
+
   return (
-    <canvas
-      ref={canvasRef}
-      width={width}
-      height={height}
-      className={`drawing-layer absolute inset-0 z-20 ${
-        activeTool === "pan"
-          ? "cursor-grab"
-          : activeTool === "stroke-eraser" || activeTool === "precision-eraser"
-          ? "cursor-crosshair"
-          : "cursor-crosshair"
-      }`}
-      style={{
-        width: "100%",
-        height: "100%",
-        pointerEvents: activeTool === "pan" ? "none" : "auto",
-      }}
-      onPointerDown={handlePointerDown}
-      onPointerMove={handlePointerMove}
-      onPointerUp={handlePointerUp}
-      onPointerCancel={handlePointerUp}
-    />
+    <div className="absolute inset-0 z-20 pointer-events-auto">
+      {/* 1. Base Layer: Holds all completed strokes for zero redraw lag */}
+      <canvas
+        ref={baseCanvasRef}
+        width={width}
+        height={height}
+        className="absolute inset-0 pointer-events-none"
+        style={{ width: "100%", height: "100%" }}
+      />
+
+      {/* 2. Active Layer: Receives pointer events & renders in-flight stroke at 120Hz */}
+      <canvas
+        ref={activeCanvasRef}
+        width={width}
+        height={height}
+        className={`drawing-layer absolute inset-0 ${
+          activeTool === "pan" ? "cursor-grab" : "cursor-none"
+        }`}
+        style={{
+          width: "100%",
+          height: "100%",
+          pointerEvents: activeTool === "pan" ? "none" : "auto",
+        }}
+        onPointerDown={handlePointerDown}
+        onPointerMove={handlePointerMove}
+        onPointerUp={handlePointerUp}
+        onPointerCancel={handlePointerUp}
+        onPointerLeave={handlePointerLeave}
+        onContextMenu={(e) => e.preventDefault()} // Allow stylus barrel button without opening browser context menu
+      />
+
+      {/* 3. Floating Interactive Pen & Eraser Tip Cursor */}
+      {cursorPos.visible && activeTool !== "pan" && activeTool !== "select" && (
+        <div
+          className="fixed pointer-events-none z-50 rounded-full transform -translate-x-1/2 -translate-y-1/2 transition-transform duration-75 ease-out shadow-sm"
+          style={{
+            left: `${cursorPos.x}px`,
+            top: `${cursorPos.y}px`,
+            width: `${
+              activeTool === "stroke-eraser" || activeTool === "precision-eraser"
+                ? 28
+                : Math.max(6, currentWidth * scale)
+            }px`,
+            height: `${
+              activeTool === "stroke-eraser" || activeTool === "precision-eraser"
+                ? 28
+                : Math.max(6, currentWidth * scale)
+            }px`,
+            border:
+              activeTool === "stroke-eraser" || activeTool === "precision-eraser"
+                ? "2px dashed #f87171"
+                : "1.5px solid rgba(255, 255, 255, 0.8)",
+            backgroundColor:
+              activeTool === "stroke-eraser" || activeTool === "precision-eraser"
+                ? "rgba(239, 68, 68, 0.15)"
+                : currentColor,
+            opacity: 0.85,
+          }}
+        />
+      )}
+    </div>
   );
 };

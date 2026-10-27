@@ -6,6 +6,7 @@ export interface Point {
   x: number;
   y: number;
   pressure: number;
+  time?: number;
 }
 
 export interface Stroke {
@@ -16,6 +17,7 @@ export interface Stroke {
   isHighlighter?: boolean;
   isRainbow?: boolean;
   isGalaxy?: boolean;
+  isStraightLine?: boolean;
   points: Point[];
 }
 

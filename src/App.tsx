@@ -2,6 +2,7 @@
 import { OneNoteRibbon } from "./components/OneNoteRibbon";
 import { OneNoteSidebar } from "./components/OneNoteSidebar";
 import { OneNoteWorkspace } from "./components/OneNoteWorkspace";
+import { FloatingPenDock } from "./components/FloatingPenDock";
 import { renderPdfPages, exportNotebookAsPdf, downloadPdf } from "./utils/pdfEngine";
 import type {
   PageData,
@@ -275,7 +276,7 @@ export function App() {
     );
   };
 
-  // Add Blank A4 Page (Inserts blank sheet at end or right after a given page)
+  // Add Blank A4 Page
   const handleAddBlankA4Page = (style: PaperStyle, insertAfterPageId?: string) => {
     if (!activeSection) return;
 
@@ -549,6 +550,28 @@ export function App() {
           onPageTitleChange={handlePageTitleChange}
           onAddBlankA4Page={(style, insertAfterId) => handleAddBlankA4Page(style, insertAfterId)}
           onUploadPdfClick={() => fileInputRef.current?.click()}
+        />
+
+        {/* 3. FLOATING QUICK-PEN INKING DOCK (Right at your fingertip for writing pads!) */}
+        <FloatingPenDock
+          activeTool={activeTool}
+          setActiveTool={setActiveTool}
+          currentColor={currentColor}
+          setCurrentColor={setCurrentColor}
+          currentWidth={currentWidth}
+          setCurrentWidth={setCurrentWidth}
+          isHighlighter={isHighlighter}
+          setIsHighlighter={setIsHighlighter}
+          isRainbow={isRainbow}
+          setIsRainbow={setIsRainbow}
+          isGalaxy={isGalaxy}
+          setIsGalaxy={setIsGalaxy}
+          palmRejection={palmRejection}
+          setPalmRejection={setPalmRejection}
+          canUndo={canUndo}
+          canRedo={canRedo}
+          onUndo={handleUndo}
+          onRedo={handleRedo}
         />
       </div>
     </div>

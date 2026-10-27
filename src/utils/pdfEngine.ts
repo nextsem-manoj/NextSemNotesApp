@@ -82,6 +82,18 @@ export function renderStrokesToPng(strokes: Stroke[], width: number, height: num
 
     ctx.strokeStyle = stroke.color;
 
+    if (stroke.isStraightLine && stroke.points.length >= 2) {
+      const p1 = stroke.points[0];
+      const p2 = stroke.points[stroke.points.length - 1];
+      ctx.lineWidth = stroke.width;
+      ctx.beginPath();
+      ctx.moveTo(p1.x, p1.y);
+      ctx.lineTo(p2.x, p2.y);
+      ctx.stroke();
+      ctx.restore();
+      continue;
+    }
+
     if (stroke.points.length === 1) {
       ctx.fillStyle = stroke.color;
       ctx.beginPath();
@@ -97,9 +109,8 @@ export function renderStrokesToPng(strokes: Stroke[], width: number, height: num
       const p2 = stroke.points[i + 1];
       const midPoint = { x: (p1.x + p2.x) / 2, y: (p1.y + p2.y) / 2 };
 
-      // Apply pressure modulation if available
       const pressure = p2.pressure ?? 0.5;
-      ctx.lineWidth = Math.max(1, stroke.width * (0.4 + pressure * 1.2));
+      ctx.lineWidth = Math.max(1, stroke.width * (0.35 + pressure * 1.3));
 
       ctx.beginPath();
       ctx.moveTo(p1.x, p1.y);
