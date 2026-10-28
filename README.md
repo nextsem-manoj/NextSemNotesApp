@@ -1,4 +1,4 @@
-﻿# OneNote PDF Studio (Web Portal)
+# OneNote PDF Studio (Web Portal)
 
 > A web portal inspired by **Microsoft OneNote (Windows 11 Dark Theme)** where you can upload any PDF document, seamlessly insert blank/ruled/grid A4 sheets anywhere inside it, and write with digital writing pads and styluses.
 
@@ -52,7 +52,7 @@
 
 ```bash
 # Clone or navigate to the repository
-cd "C:\Users\Manoj\Nextsem Repositories\onenote-pdf-portal"
+cd "C:\Users\Manoj\nextsemorg\onenote-pdf-portal"
 
 # Install dependencies
 npm install
