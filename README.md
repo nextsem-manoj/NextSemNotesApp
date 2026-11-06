@@ -1,6 +1,6 @@
-# OneNote PDF Studio (Web Portal)
+# NextSemNotesApp (OneNote PDF Studio)
 
-> A web portal inspired by **Microsoft OneNote (Windows 11 Dark Theme)** where you can upload any PDF document, seamlessly insert blank/ruled/grid A4 sheets anywhere inside it, and write with digital writing pads and styluses.
+> A modern web notes portal inspired by **Microsoft OneNote (Windows 11 Dark Theme)** where students and educators can upload any PDF document, seamlessly insert blank/ruled/grid A4 sheets anywhere inside it, and write with digital writing pads and styluses.
 
 ![OneNote PDF Studio UI](https://img.shields.io/badge/UI-Microsoft%20OneNote%20Dark%20Theme-7719aa)
 ![Status](https://img.shields.io/badge/Status-Production%20Ready-success)
